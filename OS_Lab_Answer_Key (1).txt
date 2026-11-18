@@ -1,0 +1,277 @@
+COMP207 OS LAB ANSWER KEY - ALL PYTHON (tested). Lines tagged '# <<< WRITE' = must write. Run: python3 labX.py
+
+################ LAB 4  (lab4.py) ################
+n = int(input())
+procs = []
+for _ in range(n):
+    pid, at, bt, pr = map(int, input().split())
+    procs.append({'pid': pid, 'at': at, 'bt': bt, 'pr': pr})
+q = int(input())
+
+def gantt(g):
+    out = ""; s = 0
+    for t in range(1, len(g) + 1):
+        if t == len(g) or g[t] != g[s]:
+            out += f"| {g[s]} ({s}-{t}) "; s = t
+    print("Gantt:", out + "|")
+
+def report(name, st, ct, g):
+    print("\n" + name)
+    print("PID\tST\tCT\tRT\tWT\tTAT")
+    for i, p in enumerate(procs):
+        tat = ct[i] - p['at']
+        print(f"{p['pid']}\t{st[i]}\t{ct[i]}\t{st[i]-p['at']}\t{tat-p['bt']}\t{tat}")
+    gantt(g)
+
+def preemptive(name, keyf):          # used for BOTH Priority and SRTF
+    rem = [p['bt'] for p in procs]
+    st = [-1] * n; ct = [0] * n; g = []; t = 0; done = 0
+    while done < n:
+        ready = [i for i in range(n) if procs[i]['at'] <= t and rem[i] > 0]
+        if not ready:
+            g.append('idle'); t += 1; continue
+        i = min(ready, key=lambda i: keyf(i, rem))
+        if st[i] == -1: st[i] = t
+        rem[i] -= 1; g.append('P' + str(procs[i]['pid'])); t += 1
+        if rem[i] == 0:
+            ct[i] = t; done += 1
+    report(name, st, ct, g)
+
+def round_robin():
+    order = sorted(range(n), key=lambda i: procs[i]['at'])
+    rem = [p['bt'] for p in procs]
+    st = [-1] * n; ct = [0] * n; g = []; t = 0; k = 0; queue = []; done = 0
+    while done < n:
+        while k < n and procs[order[k]]['at'] <= t:
+            queue.append(order[k]); k += 1
+        if not queue:
+            nxt = procs[order[k]]['at']
+            g += ['idle'] * (nxt - t); t = nxt; continue
+        i = queue.pop(0)
+        if st[i] == -1: st[i] = t
+        run = min(q, rem[i])
+        g += ['P' + str(procs[i]['pid'])] * run
+        t += run; rem[i] -= run
+        while k < n and procs[order[k]]['at'] <= t:   # new arrivals go BEFORE the preempted one
+            queue.append(order[k]); k += 1
+        if rem[i] > 0: queue.append(i)
+        else: ct[i] = t; done += 1
+    report("ROUND ROBIN", st, ct, g)
+
+preemptive("PREEMPTIVE PRIORITY", lambda i, rem: (procs[i]['pr'], procs[i]['at'], i))
+preemptive("SRTF", lambda i, rem: (rem[i], procs[i]['at'], i))
+round_robin()
+
+################ LAB 5  (lab5.py) ################
+import os
+
+c1 = os.fork()                                          # <<< WRITE: create child 1
+if c1 < 0:
+    print("fork 1 failed"); os._exit(1)
+if c1 == 0:
+    print("Child 1 is running", flush=True)              # <<< WRITE
+    os._exit(0)                                          # <<< WRITE: 0 = success
+
+c2 = os.fork()                                          # <<< WRITE: create child 2
+if c2 < 0:
+    print("fork 2 failed"); os._exit(1)
+if c2 == 0:
+    print("Child 2 is running", flush=True)
+    os._exit(1)                                          # <<< WRITE: nonzero = FAIL
+
+_, status = os.waitpid(c1, 0)                            # <<< WRITE: parent waits for child 1
+if os.WIFEXITED(status) and os.WEXITSTATUS(status) == 0: # <<< WRITE
+    print("Child 1: Completed Successfully.")
+else:
+    print("Child 1: Execution Failed.")
+
+_, status = os.waitpid(c2, 0)                            # <<< WRITE: parent waits for child 2
+if os.WIFEXITED(status) and os.WEXITSTATUS(status) == 0:
+    print("Child 2: Completed Successfully.")
+else:
+    print("Child 2: Execution Failed.")
+
+################ LAB 6  (lab6.py) ################
+import os, mmap
+
+r, w = os.pipe()                       # r = read end, w = write end
+shm = mmap.mmap(-1, 4)                 # shared memory (4 bytes) - shared with child after fork
+
+pid = os.fork()
+
+if pid == 0:
+    # ---- CHILD ----
+    os.close(w)                                            # <<< WRITE: close write end
+    data = os.read(r, 4096).decode().split()               # <<< WRITE: read array from pipe
+    arr = [int(x) for x in data]
+    print("Child received array through pipe.", flush=True)
+    s = sum(arr)                                           # <<< WRITE: compute sum
+    print(f"Child computed sum = {s}.", flush=True)
+    shm[0:4] = s.to_bytes(4, 'little')                     # <<< WRITE: store sum in shared memory
+    print("Child stored result in shared memory.", flush=True)
+    os._exit(0)
+else:
+    # ---- PARENT ----
+    print("Parent process created.", flush=True)
+    os.close(r)                                            # <<< WRITE: close read end
+    n = int(input("Number of elements: "))                 # <<< WRITE: read array from user
+    arr = list(map(int, input("Array: ").split()))[:n]
+    print("Parent writing array to pipe.", flush=True)
+    os.write(w, " ".join(map(str, arr)).encode())          # <<< WRITE: write array to pipe
+    os.close(w)
+    os.wait()                                              # <<< WRITE: wait for child
+    total = int.from_bytes(shm[0:4], 'little')             # <<< WRITE: read sum from shared memory
+    print("Parent read sum from shared memory.")
+    print("Final Sum =", total)                            # <<< WRITE: display result
+    shm.close()
+
+################ LAB 7  (lab7.py) ################
+import threading, time
+
+waiting_chairs = int(input("Number of waiting chairs: "))
+num_customers = int(input("Number of customers: "))
+
+waiting_customers = 0
+customers = threading.Semaphore(0)       # <<< WRITE: counts waiting customers
+barber = threading.Semaphore(0)          # <<< WRITE: barber ready signal
+mutex = threading.Lock()                 # <<< WRITE: protects waiting_customers
+
+def barber_function():
+    global waiting_customers
+    while True:
+        with mutex:
+            if waiting_customers == 0:
+                print("Barber sleeping...", flush=True)
+        customers.acquire()              # <<< WRITE: sleep until a customer comes
+        with mutex:                      # <<< WRITE: lock ... unlock
+            waiting_customers -= 1       # <<< WRITE
+            barber.release()             # <<< WRITE: barber is ready
+        print("Barber is cutting hair...", flush=True)
+        time.sleep(1)
+        print("Barber finished haircut.", flush=True)
+
+def customer_function(cid):
+    global waiting_customers
+    print(f"Customer {cid} arrived.", flush=True)
+    mutex.acquire()                                          # <<< WRITE: lock
+    if waiting_customers < waiting_chairs:
+        waiting_customers += 1                               # <<< WRITE
+        print(f"Customer {cid} is waiting.", flush=True)
+        customers.release()                                  # <<< WRITE: wake barber
+        mutex.release()                                      # <<< WRITE: unlock
+        barber.acquire()                                     # <<< WRITE: wait for barber
+        print(f"Customer {cid} is getting a haircut.", flush=True)
+    else:
+        print(f"Customer {cid} left (no chair available).", flush=True)
+        mutex.release()                                      # <<< WRITE: unlock
+
+threading.Thread(target=barber_function, daemon=True).start()          # <<< WRITE: barber thread
+
+threads = []
+for i in range(1, num_customers + 1):
+    t = threading.Thread(target=customer_function, args=(i,))          # <<< WRITE: customer threads
+    threads.append(t); t.start()
+    time.sleep(0.4)                                                    # gap so output looks realistic
+for t in threads:
+    t.join()                                                           # <<< WRITE: wait for customers
+
+################ LAB 8  (lab8.py) ################
+m = int(input())
+total = list(map(int, input().split()))
+n = int(input())
+alloc, mx = [], []
+for _ in range(n):
+    row = list(map(int, input().split()))
+    alloc.append(row[:m]); mx.append(row[m:])
+
+need = [[mx[i][j] - alloc[i][j] for j in range(m)] for i in range(n)]
+av = [total[j] - sum(alloc[i][j] for i in range(n)) for j in range(m)]
+finish = [False] * n
+seq = []
+while len(seq) < n:
+    found = False
+    for i in range(n):                      # one pass over all processes
+        if not finish[i] and all(need[i][j] <= av[j] for j in range(m)):
+            for j in range(m):
+                av[j] += alloc[i][j]        # process finishes, gives resources back
+            finish[i] = True
+            seq.append(i)
+            found = True
+    if not found:                           # nobody could run in a full pass
+        break
+
+if len(seq) == n:
+    print("<" + ", ".join("P" + str(i) for i in seq) + ">")
+else:
+    print("Unsafe state - deadlock possible")
+
+################ LAB 9  (lab9.py) ################
+parts = [int(input()) for _ in range(int(input()))]
+procs = [int(input()) for _ in range(int(input()))]
+
+def allocate(name, strategy):
+    print(name + ":")
+    rem = parts[:]
+    held = [[] for _ in parts]
+    unalloc = []
+    for pid, size in enumerate(procs, 1):
+        cand = [i for i in range(len(parts)) if rem[i] >= size]
+        if not cand:
+            unalloc.append(pid); continue
+        if strategy == 'first':   k = cand[0]
+        elif strategy == 'best':  k = min(cand, key=lambda i: rem[i])
+        else:                     k = max(cand, key=lambda i: rem[i])
+        held[k].append((pid, size)); rem[k] -= size
+    for i in range(len(parts)):
+        for pid, size in held[i]:
+            print(f"P{pid} {size}")
+        if rem[i] > 0:
+            print(f"EM {rem[i]}")
+    print("Unallocated Processes:", ", ".join(f"P{p}" for p in unalloc) if unalloc else "None")
+    print()
+
+allocate("First Fit", 'first')
+allocate("Best Fit", 'best')
+allocate("Worst Fit", 'worst')
+
+################ LAB 10  (lab10.py) ################
+F = int(input())
+n = int(input())
+pages = [int(input()) for _ in range(n)]
+
+def simulate(name, mode):
+    fr = [None] * F; last = {}; ptr = 0
+    cols = []; flags = []; faults = 0
+    for i, p in enumerate(pages):
+        if p in fr:
+            flags.append('H')
+        else:
+            faults += 1; flags.append('F')
+            if None in fr:
+                k = fr.index(None)                    # empty frame first
+            elif mode == 'FIFO':
+                k = ptr; ptr = (ptr + 1) % F          # oldest page
+            elif mode == 'LRU':
+                k = min(range(F), key=lambda j: last[fr[j]])   # least recently used
+            else:                                      # OPR
+                def nxt(j):
+                    try: return pages.index(fr[j], i + 1)
+                    except ValueError: return n + 1    # never used again
+                k = max(range(F), key=nxt)             # used farthest in future
+            fr[k] = p
+        last[p] = i
+        cols.append(fr[:])
+    print(name + ":")
+    for r in range(F):
+        print("|" + "|".join(" " if c[r] is None else str(c[r]) for c in cols) + "|")
+    print("|" + "|".join(flags) + "|")
+    print("No. of Page Faults:", faults)
+    print("No. of Hits:", n - faults)
+    print()
+
+simulate("FIFO", "FIFO")
+simulate("OPR", "OPR")
+simulate("LRU", "LRU")
+
+NOTE Lab 9: prof sheet's First Fit 'P4 350' is a typo; correct is 'P4 200 / EM 150'.
+NOTE Lab 8: do full passes, don't restart from P0.

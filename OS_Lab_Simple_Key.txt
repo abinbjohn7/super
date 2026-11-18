@@ -1,0 +1,202 @@
+OS LAB SIMPLE KEY (all Python, tested). Lines with '# <<<' = learn these. Run: python3 labX.py
+
+######## LAB 4 ########
+n = int(input())
+P = [list(map(int, input().split())) for _ in range(n)]   # each row: pid, arrival, burst, priority
+q = int(input())
+
+def show(name, st, ct):
+    print("\n" + name + "\nPID ST CT RT WT TAT")
+    for i, (pid, at, bt, pr) in enumerate(P):
+        tat = ct[i] - at                                   # <<< TAT = CT - AT
+        print(pid, st[i], ct[i], st[i] - at, tat - bt, tat)  # <<< RT = ST - AT, WT = TAT - BT
+
+def preempt(name, key):                 # same code for Priority and SRTF
+    rem = [p[2] for p in P]; st = [-1] * n; ct = [0] * n; t = 0
+    while any(rem):
+        ready = [i for i in range(n) if P[i][1] <= t and rem[i] > 0]
+        if not ready: t += 1; continue
+        i = min(ready, key=lambda i: key(i, rem))          # <<< pick best ready process
+        if st[i] == -1: st[i] = t                          # <<< first time it runs = start time
+        rem[i] -= 1; t += 1                                # <<< run for 1 second
+        if rem[i] == 0: ct[i] = t
+    show(name, st, ct)
+
+preempt("PRIORITY", lambda i, rem: (P[i][3], P[i][1]))    # <<< smallest priority number wins
+preempt("SRTF", lambda i, rem: (rem[i], P[i][1]))         # <<< smallest remaining time wins
+
+# ---- Round Robin ----
+rem = [p[2] for p in P]; st = [-1] * n; ct = [0] * n; t = 0; queue = []; added = [0] * n
+def arrive():
+    for i in sorted(range(n), key=lambda i: P[i][1]):
+        if P[i][1] <= t and not added[i]: added[i] = 1; queue.append(i)
+while any(rem):
+    arrive()
+    if not queue: t += 1; continue
+    i = queue.pop(0)                                       # <<< take first in queue
+    if st[i] == -1: st[i] = t
+    run = min(q, rem[i]); t += run; rem[i] -= run          # <<< run for quantum (or less)
+    arrive()                                               # <<< new arrivals go first
+    if rem[i] > 0: queue.append(i)                         # <<< unfinished -> back of queue
+    else: ct[i] = t
+show("ROUND ROBIN", st, ct)
+
+######## LAB 5 ########
+import os
+
+c1 = os.fork()                       # <<< make child 1
+if c1 == 0:
+    print("Child 1 running")
+    os._exit(0)                      # <<< 0 = success
+
+c2 = os.fork()                       # <<< make child 2
+if c2 == 0:
+    print("Child 2 running")
+    os._exit(1)                      # <<< 1 = fail
+
+_, s = os.waitpid(c1, 0)             # <<< parent waits
+if os.WIFEXITED(s) and os.WEXITSTATUS(s) == 0:
+    print("Child 1: Completed Successfully.")
+else:
+    print("Child 1: Execution Failed.")
+
+_, s = os.waitpid(c2, 0)
+if os.WIFEXITED(s) and os.WEXITSTATUS(s) == 0:
+    print("Child 2: Completed Successfully.")
+else:
+    print("Child 2: Execution Failed.")
+
+######## LAB 6 ########
+import os, mmap
+
+r, w = os.pipe()                     # <<< pipe: r = read, w = write
+shm = mmap.mmap(-1, 4)               # <<< shared memory (make BEFORE fork)
+
+if os.fork() == 0:                   # ---- CHILD ----
+    os.close(w)
+    arr = list(map(int, os.read(r, 1000).decode().split()))   # <<< read array from pipe
+    print("Child received array through pipe.")
+    s = sum(arr)                                              # <<< compute sum
+    print("Child computed sum =", s)
+    shm[0:4] = s.to_bytes(4, 'little')                        # <<< put sum in shared memory
+    print("Child stored result in shared memory.")
+    os._exit(0)
+else:                                # ---- PARENT ----
+    print("Parent process created.")
+    os.close(r)
+    n = int(input("Number of elements: "))
+    arr = input("Array: ").split()
+    print("Parent writing array to pipe.")
+    os.write(w, " ".join(arr).encode())                       # <<< send array into pipe
+    os.close(w)
+    os.wait()                                                 # <<< wait for child
+    print("Parent read sum from shared memory.")
+    print("Final Sum =", int.from_bytes(shm[0:4], 'little'))  # <<< read sum from shared memory
+
+######## LAB 7 ########
+import threading, time
+
+chairs = int(input("Number of waiting chairs: "))
+num = int(input("Number of customers: "))
+waiting = 0
+customers = threading.Semaphore(0)   # <<< counts waiting customers
+barber = threading.Semaphore(0)      # <<< barber ready signal
+mutex = threading.Lock()             # <<< protects 'waiting'
+
+def barber_fn():
+    global waiting
+    while True:
+        customers.acquire()          # <<< sleep until a customer comes
+        with mutex:
+            waiting -= 1             # <<< one customer leaves the chair
+        barber.release()             # <<< barber is ready
+        print("Barber is cutting hair...")
+        time.sleep(1)
+        print("Barber finished haircut.")
+
+def customer_fn(cid):
+    global waiting
+    print(f"Customer {cid} arrived.")
+    mutex.acquire()                  # <<< lock
+    if waiting < chairs:
+        waiting += 1                 # <<< take a chair
+        print(f"Customer {cid} is waiting.")
+        customers.release()          # <<< wake the barber
+        mutex.release()              # <<< unlock
+        barber.acquire()             # <<< wait for barber
+        print(f"Customer {cid} is getting a haircut.")
+    else:
+        print(f"Customer {cid} left (no chair available).")
+        mutex.release()              # <<< unlock here too!
+
+threading.Thread(target=barber_fn, daemon=True).start()
+ts = []
+for i in range(1, num + 1):
+    t = threading.Thread(target=customer_fn, args=(i,)); ts.append(t); t.start()
+    time.sleep(0.4)
+for t in ts: t.join()
+
+######## LAB 8 ########
+m = int(input())
+total = list(map(int, input().split()))
+n = int(input())
+alloc, mx = [], []
+for _ in range(n):
+    row = list(map(int, input().split()))
+    alloc.append(row[:m]); mx.append(row[m:])
+
+need = [[mx[i][j] - alloc[i][j] for j in range(m)] for i in range(n)]   # <<< Need = Max - Alloc
+av = [total[j] - sum(a[j] for a in alloc) for j in range(m)]            # <<< Available = Total - Allocated
+done = [False] * n; seq = []
+for _ in range(n):                                  # repeat passes
+    for i in range(n):
+        if not done[i] and all(need[i][j] <= av[j] for j in range(m)):  # <<< can it finish?
+            av = [av[j] + alloc[i][j] for j in range(m)]                # <<< it finishes, gives back resources
+            done[i] = True; seq.append(i)
+print("<" + ", ".join("P" + str(i) for i in seq) + ">" if len(seq) == n else "Unsafe")
+
+######## LAB 9 ########
+parts = [int(input()) for _ in range(int(input()))]
+procs = [int(input()) for _ in range(int(input()))]
+
+def allocate(name):
+    print(name + " Fit:")
+    rem = parts[:]; held = [[] for _ in parts]; un = []
+    for pid, size in enumerate(procs, 1):
+        ok = [i for i in range(len(rem)) if rem[i] >= size]           # <<< blocks big enough
+        if not ok: un.append(pid); continue
+        if name == "First": k = ok[0]                                 # <<< first one
+        elif name == "Best": k = min(ok, key=lambda i: rem[i])        # <<< smallest one
+        else: k = max(ok, key=lambda i: rem[i])                       # <<< largest one
+        held[k].append((pid, size)); rem[k] -= size
+    for i in range(len(rem)):
+        for pid, size in held[i]: print(f"P{pid} {size}")
+        if rem[i] > 0: print("EM", rem[i])                            # <<< leftover = EM
+    print("Unallocated Processes:", ", ".join("P%d" % p for p in un) or "None\n")
+
+for s in ["First", "Best", "Worst"]: allocate(s)
+
+######## LAB 10 ########
+F = int(input()); n = int(input())
+pages = [int(input()) for _ in range(n)]
+
+def run(name):
+    fr = [None] * F; last = {}; ptr = 0; cols = []; flags = []
+    for i, p in enumerate(pages):
+        if p in fr: flags.append('H')                                  # <<< already in frame = HIT
+        else:
+            flags.append('F')                                          # <<< not in frame = FAULT
+            future = pages[i + 1:]
+            if None in fr: k = fr.index(None)                          # <<< empty slot first
+            elif name == "FIFO": k = ptr; ptr = (ptr + 1) % F          # <<< oldest goes out
+            elif name == "LRU": k = min(range(F), key=lambda j: last[fr[j]])   # <<< least recently used goes out
+            else: k = max(range(F), key=lambda j: future.index(fr[j]) if fr[j] in future else 999)  # <<< used farthest later goes out
+            fr[k] = p
+        last[p] = i                                                    # <<< remember last use time
+        cols.append(fr[:])
+    print(name + ":")
+    for r in range(F): print("|" + "|".join(" " if c[r] is None else str(c[r]) for c in cols) + "|")
+    print("|" + "|".join(flags) + "|")
+    print("No. of Page Faults:", flags.count('F')); print("No. of Hits:", flags.count('H')); print()
+
+for s in ["FIFO", "OPR", "LRU"]: run(s)
